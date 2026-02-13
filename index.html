@@ -116,6 +116,34 @@
       border-color: rgba(255,255,255,0.6);
     }
 
+    /* Time scale controls */
+    #timescale {
+      position: fixed;
+      bottom: 100px;
+      right: 12px;
+      display: none;
+      gap: 4px;
+      z-index: 10;
+    }
+    .ts-btn {
+      width: 36px;
+      height: 28px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.06);
+      color: #aaa;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ts-btn:hover {
+      background: rgba(255,255,255,0.15);
+      border-color: rgba(255,255,255,0.4);
+    }
+
     /* Instructions */
     #instructions {
       position: fixed;
@@ -152,6 +180,13 @@
   <div id="hud">
     <div id="hud-speed">Speed: 0</div>
     <div id="hud-pos">Pos: (0, 0)</div>
+    <div id="hud-time">Time: 1x</div>
+  </div>
+
+  <div id="timescale">
+    <button class="ts-btn" id="ts-slower">&lt;&lt;</button>
+    <button class="ts-btn" id="ts-pause">&#9646;&#9646;</button>
+    <button class="ts-btn" id="ts-faster">&gt;&gt;</button>
   </div>
 
   <div id="instructions">
@@ -159,6 +194,8 @@
     A / Left - Rotate Left<br>
     D / Right - Rotate Right<br>
     Scroll - Zoom<br>
+    , / . - Time slower/faster<br>
+    Space - Pause<br>
     R - Respawn
   </div>
 
@@ -177,6 +214,7 @@
         document.getElementById('hud').style.display = 'block';
         document.getElementById('instructions').style.display = 'block';
         document.getElementById('controls').style.display = 'flex';
+        document.getElementById('timescale').style.display = 'flex';
         import('./game.js').then(m => m.startGame(levelId));
       });
     });

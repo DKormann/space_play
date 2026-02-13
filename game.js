@@ -312,6 +312,38 @@ export function startGame(levelId) {
   });
 
   // =========================================================
+  // Time scale
+  // =========================================================
+
+  const timeScales = [0, 0.25, 0.5, 1, 2, 4, 8, 16];
+  let timeScaleIndex = 3; // starts at 1x
+  let timeScale = 1;
+  const hudTime = document.getElementById('hud-time');
+
+  function setTimeScale(idx) {
+    timeScaleIndex = Math.max(0, Math.min(timeScales.length - 1, idx));
+    timeScale = timeScales[timeScaleIndex];
+    if (hudTime) hudTime.textContent = timeScale === 0 ? 'Time: PAUSED' : `Time: ${timeScale}x`;
+  }
+
+  document.getElementById('ts-slower')?.addEventListener('click', () => setTimeScale(timeScaleIndex - 1));
+  document.getElementById('ts-faster')?.addEventListener('click', () => setTimeScale(timeScaleIndex + 1));
+  document.getElementById('ts-pause')?.addEventListener('click', () => {
+    if (timeScale === 0) setTimeScale(3); // unpause to 1x
+    else setTimeScale(0);
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Comma' || e.code === 'BracketLeft') setTimeScale(timeScaleIndex - 1);
+    if (e.code === 'Period' || e.code === 'BracketRight') setTimeScale(timeScaleIndex + 1);
+    if (e.code === 'Space') {
+      e.preventDefault();
+      if (timeScale === 0) setTimeScale(3);
+      else setTimeScale(0);
+    }
+  });
+
+  // =========================================================
   // Game loop
   // =========================================================
 
@@ -322,6 +354,7 @@ export function startGame(levelId) {
 
     let dt = clock.getDelta();
     if (dt > 0.05) dt = 0.05;
+    dt *= timeScale;
 
     // Planet physics
     const pg = gravitationalForce(L.G, 0, 0, L.SUN_MASS, planet.x, planet.y);
