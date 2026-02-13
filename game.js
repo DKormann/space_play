@@ -4,6 +4,7 @@ import {
   ROCKET_THRUST, ROCKET_ROTATION_SPEED,
   SUN_RADIUS, PLANET_RADIUS, ROCKET_SIZE,
   SUN_COLLISION_RADIUS, PLANET_COLLISION_RADIUS,
+  ROCKET_PLANET_ORBIT_RADIUS,
   gravitationalForce, integrate, checkCollision,
 } from './physics.js';
 
@@ -13,8 +14,8 @@ import {
 
 const scene = new THREE.Scene();
 
-// Orthographic camera (2D top-down)
-const frustumSize = 800;
+// Viewport scaled to planet neighborhood (rocket orbits ~30 units from planet)
+const frustumSize = 200;
 let aspect = window.innerWidth / window.innerHeight;
 const camera = new THREE.OrthographicCamera(
   -frustumSize * aspect / 2, frustumSize * aspect / 2,
@@ -30,19 +31,19 @@ document.body.appendChild(renderer.domElement);
 
 // Zoom level
 let zoom = 1;
-const MIN_ZOOM = 0.15;
-const MAX_ZOOM = 3;
+const MIN_ZOOM = 0.02;
+const MAX_ZOOM = 5;
 
 // =============================================================
 // Starfield background
 // =============================================================
 
-const starCount = 400;
+const starCount = 600;
 const starGeo = new THREE.BufferGeometry();
 const starPositions = new Float32Array(starCount * 3);
 for (let i = 0; i < starCount; i++) {
-  starPositions[i * 3] = (Math.random() - 0.5) * 4000;
-  starPositions[i * 3 + 1] = (Math.random() - 0.5) * 4000;
+  starPositions[i * 3] = (Math.random() - 0.5) * 20000;
+  starPositions[i * 3 + 1] = (Math.random() - 0.5) * 20000;
   starPositions[i * 3 + 2] = -1;
 }
 starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
@@ -69,7 +70,7 @@ scene.add(glowMesh);
 // Planet orbit line
 // =============================================================
 
-const orbitSegments = 128;
+const orbitSegments = 256;
 const orbitPoints = [];
 for (let i = 0; i <= orbitSegments; i++) {
   const angle = (i / orbitSegments) * Math.PI * 2;
@@ -129,16 +130,91 @@ const flameMesh = new THREE.Mesh(flameGeo, flameMat);
 flameMesh.visible = false;
 rocketMesh.add(flameMesh);
 
-// Rocket state
+// Rocket starts in orbit around the planet
+// Orbital velocity around planet: v = sqrt(G * PLANET_MASS / r)
+const rocketOrbitV = Math.sqrt(G * PLANET_MASS / ROCKET_PLANET_ORBIT_RADIUS);
+
 const rocket = {
-  x: PLANET_ORBITAL_RADIUS + 40,
-  y: 0,
-  vx: 0,
-  vy: PLANET_INITIAL_VELOCITY,
-  angle: Math.PI / 2, // facing "up"
+  x: planet.x + ROCKET_PLANET_ORBIT_RADIUS,
+  y: planet.y,
+  vx: planet.vx,
+  vy: planet.vy + rocketOrbitV,
+  angle: Math.PI / 2,
   thrusting: false,
   alive: true,
 };
+
+// =============================================================
+// Off-screen indicators (HTML overlays)
+// =============================================================
+
+function createIndicator(color, label) {
+  const el = document.createElement('div');
+  el.style.cssText = `
+    position: fixed;
+    pointer-events: none;
+    z-index: 10;
+    display: none;
+    align-items: center;
+    gap: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: ${color};
+    text-shadow: 0 0 4px #000;
+  `;
+  // Arrow triangle
+  const arrow = document.createElement('div');
+  arrow.style.cssText = `
+    width: 0; height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 10px solid ${color};
+    transform-origin: center center;
+  `;
+  el.appendChild(arrow);
+  // Label
+  const text = document.createElement('span');
+  text.textContent = label;
+  el.appendChild(text);
+  document.body.appendChild(el);
+  return { el, arrow };
+}
+
+const sunIndicator = createIndicator('#ffcc00', 'Sun');
+const planetIndicator = createIndicator('#44aacc', 'Earth');
+
+function updateIndicator(indicator, worldX, worldY) {
+  const effectiveSize = frustumSize / zoom;
+  const halfW = effectiveSize * aspect / 2;
+  const halfH = effectiveSize / 2;
+
+  const relX = worldX - camera.position.x;
+  const relY = worldY - camera.position.y;
+
+  // Check if on screen (with margin)
+  if (Math.abs(relX) < halfW * 0.9 && Math.abs(relY) < halfH * 0.9) {
+    indicator.el.style.display = 'none';
+    return;
+  }
+
+  indicator.el.style.display = 'flex';
+
+  // Normalize to screen coordinates
+  const screenX = (relX / halfW) * 0.5 + 0.5;
+  const screenY = (-relY / halfH) * 0.5 + 0.5; // flip Y
+
+  // Clamp to screen edges with padding
+  const pad = 30;
+  const cx = Math.max(pad, Math.min(window.innerWidth - pad, screenX * window.innerWidth));
+  const cy = Math.max(pad, Math.min(window.innerHeight - pad - 60, screenY * window.innerHeight));
+
+  indicator.el.style.left = cx + 'px';
+  indicator.el.style.top = cy + 'px';
+
+  // Rotate arrow to point toward the object
+  const angle = Math.atan2(-(worldY - camera.position.y), worldX - camera.position.x);
+  indicator.arrow.style.transform = `rotate(${-angle + Math.PI / 2}rad)`;
+}
 
 // =============================================================
 // Input handling
@@ -197,10 +273,11 @@ const hudPos = document.getElementById('hud-pos');
 // =============================================================
 
 function respawnRocket() {
-  rocket.x = PLANET_ORBITAL_RADIUS + 40;
-  rocket.y = 0;
-  rocket.vx = 0;
-  rocket.vy = PLANET_INITIAL_VELOCITY;
+  const orbitV = Math.sqrt(G * PLANET_MASS / ROCKET_PLANET_ORBIT_RADIUS);
+  rocket.x = planet.x + ROCKET_PLANET_ORBIT_RADIUS;
+  rocket.y = planet.y;
+  rocket.vx = planet.vx;
+  rocket.vy = planet.vy + orbitV;
   rocket.angle = Math.PI / 2;
   rocket.thrusting = false;
   rocket.alive = true;
@@ -221,7 +298,6 @@ function animate() {
   requestAnimationFrame(animate);
 
   let dt = clock.getDelta();
-  // Clamp dt to avoid spiral of death
   if (dt > 0.05) dt = 0.05;
 
   // --- Planet physics ---
@@ -230,19 +306,15 @@ function animate() {
 
   // --- Rocket physics ---
   if (rocket.alive) {
-    // Rotation
     if (keys.left) rocket.angle += ROCKET_ROTATION_SPEED * dt;
     if (keys.right) rocket.angle -= ROCKET_ROTATION_SPEED * dt;
 
-    // Gravity from sun
     const rocketSunGrav = gravitationalForce(0, 0, SUN_MASS, rocket.x, rocket.y);
-    // Gravity from planet
     const rocketPlanetGrav = gravitationalForce(planet.x, planet.y, PLANET_MASS, rocket.x, rocket.y);
 
     let ax = rocketSunGrav.fx + rocketPlanetGrav.fx;
     let ay = rocketSunGrav.fy + rocketPlanetGrav.fy;
 
-    // Thrust
     rocket.thrusting = keys.forward;
     if (rocket.thrusting) {
       ax += Math.cos(rocket.angle) * ROCKET_THRUST / ROCKET_MASS;
@@ -251,7 +323,6 @@ function animate() {
 
     integrate(rocket, ax, ay, dt);
 
-    // Collision detection
     if (checkCollision(rocket.x, rocket.y, ROCKET_SIZE * 0.5, 0, 0, SUN_COLLISION_RADIUS)) {
       rocket.alive = false;
       rocketMesh.visible = false;
@@ -267,9 +338,8 @@ function animate() {
 
   if (rocket.alive) {
     rocketMesh.position.set(rocket.x, rocket.y, 0);
-    rocketMesh.rotation.z = rocket.angle - Math.PI / 2; // offset because triangle points up
+    rocketMesh.rotation.z = rocket.angle - Math.PI / 2;
     flameMesh.visible = rocket.thrusting;
-    // Flicker the flame
     if (rocket.thrusting) {
       flameMesh.scale.y = 0.8 + Math.random() * 0.5;
     }
@@ -291,6 +361,10 @@ function animate() {
   // Parallax starfield
   stars.position.x = camera.position.x * 0.5;
   stars.position.y = camera.position.y * 0.5;
+
+  // --- Off-screen indicators ---
+  updateIndicator(sunIndicator, 0, 0);
+  updateIndicator(planetIndicator, planet.x, planet.y);
 
   // --- HUD ---
   if (hudSpeed) {
