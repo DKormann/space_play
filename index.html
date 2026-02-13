@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Space Player - 2D Space Simulator</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      overflow: hidden;
+      background: #000;
+      font-family: 'Courier New', monospace;
+      color: #aaa;
+    }
+    canvas { display: block; }
+
+    /* HUD */
+    #hud {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      font-size: 14px;
+      pointer-events: none;
+      z-index: 10;
+      text-shadow: 0 0 4px #000;
+    }
+    #hud div { margin-bottom: 4px; }
+
+    /* Touch controls */
+    #controls {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 16px;
+      z-index: 10;
+    }
+    .ctrl-btn {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.3);
+      background: rgba(255,255,255,0.08);
+      color: #ccc;
+      font-size: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      cursor: pointer;
+    }
+    .ctrl-btn:active {
+      background: rgba(255,255,255,0.25);
+      border-color: rgba(255,255,255,0.6);
+    }
+
+    /* Instructions */
+    #instructions {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      font-size: 12px;
+      text-align: right;
+      pointer-events: none;
+      z-index: 10;
+      opacity: 0.5;
+      text-shadow: 0 0 4px #000;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div id="hud-speed">Speed: 0</div>
+    <div id="hud-pos">Pos: (0, 0)</div>
+  </div>
+
+  <div id="instructions">
+    W / Up - Thrust<br>
+    A / Left - Rotate Left<br>
+    D / Right - Rotate Right<br>
+    Scroll - Zoom<br>
+    R - Respawn
+  </div>
+
+  <div id="controls">
+    <div class="ctrl-btn" id="btn-left">&#8592;</div>
+    <div class="ctrl-btn" id="btn-thrust">&#9650;</div>
+    <div class="ctrl-btn" id="btn-right">&#8594;</div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // After Three.js loads as global, dynamically import the ES module game script
+    import('./game.js');
+  </script>
+</body>
+</html>
