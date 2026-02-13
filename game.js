@@ -173,6 +173,8 @@ export function startGame(levelId) {
     angle: Math.PI / 2,
     thrusting: false,
     alive: true,
+    landed: false,
+    landedAngle: 0, // angle on planet surface where landed
   };
 
   // =========================================================
@@ -301,6 +303,7 @@ export function startGame(levelId) {
     rocket.angle = Math.PI / 2;
     rocket.thrusting = false;
     rocket.alive = true;
+    rocket.landed = false;
     rocketMesh.visible = true;
   }
 
@@ -325,7 +328,25 @@ export function startGame(levelId) {
     integrate(planet, pg.fx, pg.fy, dt);
 
     // Rocket physics
-    if (rocket.alive) {
+    if (rocket.alive && rocket.landed) {
+      // Stick to planet surface
+      rocket.x = planet.x + Math.cos(rocket.landedAngle) * (L.PLANET_RADIUS + L.ROCKET_SIZE * 0.5);
+      rocket.y = planet.y + Math.sin(rocket.landedAngle) * (L.PLANET_RADIUS + L.ROCKET_SIZE * 0.5);
+      rocket.vx = planet.vx;
+      rocket.vy = planet.vy;
+
+      // Allow rotation while landed
+      if (keys.left) rocket.angle += L.ROCKET_ROTATION_SPEED * dt;
+      if (keys.right) rocket.angle -= L.ROCKET_ROTATION_SPEED * dt;
+
+      // Thrust to take off
+      rocket.thrusting = keys.forward;
+      if (rocket.thrusting) {
+        rocket.landed = false;
+        rocket.vx += Math.cos(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS * dt * 5;
+        rocket.vy += Math.sin(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS * dt * 5;
+      }
+    } else if (rocket.alive) {
       if (keys.left) rocket.angle += L.ROCKET_ROTATION_SPEED * dt;
       if (keys.right) rocket.angle -= L.ROCKET_ROTATION_SPEED * dt;
 
@@ -343,13 +364,29 @@ export function startGame(levelId) {
 
       integrate(rocket, ax, ay, dt);
 
+      // Sun collision: always fatal
       if (checkCollision(rocket.x, rocket.y, L.ROCKET_SIZE * 0.5, 0, 0, L.SUN_COLLISION_RADIUS)) {
         rocket.alive = false;
         rocketMesh.visible = false;
       }
+
+      // Planet collision: land or crash depending on relative speed
       if (checkCollision(rocket.x, rocket.y, L.ROCKET_SIZE * 0.5, planet.x, planet.y, L.PLANET_COLLISION_RADIUS)) {
-        rocket.alive = false;
-        rocketMesh.visible = false;
+        const relVx = rocket.vx - planet.vx;
+        const relVy = rocket.vy - planet.vy;
+        const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
+
+        if (relSpeed < L.LANDING_SPEED) {
+          // Safe landing
+          rocket.landed = true;
+          rocket.landedAngle = Math.atan2(rocket.y - planet.y, rocket.x - planet.x);
+          rocket.vx = planet.vx;
+          rocket.vy = planet.vy;
+        } else {
+          // Crash
+          rocket.alive = false;
+          rocketMesh.visible = false;
+        }
       }
     }
 
@@ -419,6 +456,8 @@ export function startGame(levelId) {
     if (hudPos) {
       if (!rocket.alive) {
         hudPos.textContent = 'DESTROYED - Press R to respawn';
+      } else if (rocket.landed) {
+        hudPos.textContent = 'LANDED - Thrust to take off';
       } else {
         hudPos.textContent = `Pos: (${rocket.x.toFixed(0)}, ${rocket.y.toFixed(0)})`;
       }

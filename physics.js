@@ -16,12 +16,13 @@ export const LEVELS = {
     ROCKET_ROTATION_SPEED: 3,
     SUN_RADIUS: 30,
     PLANET_RADIUS: 10,
-    ROCKET_SIZE: 6,
-    ROCKET_PLANET_ORBIT_RADIUS: 40,
+    ROCKET_SIZE: 2,
+    ROCKET_PLANET_ORBIT_RADIUS: 20,
     FRUSTUM_SIZE: 800,
     MIN_ZOOM: 0.15,
-    MAX_ZOOM: 3,
+    MAX_ZOOM: 8,
     STAR_SPREAD: 4000,
+    LANDING_SPEED: 15,   // max relative speed for safe landing
   },
   realistic: {
     name: 'Realistic',
@@ -35,12 +36,13 @@ export const LEVELS = {
     ROCKET_ROTATION_SPEED: 3,
     SUN_RADIUS: 100,
     PLANET_RADIUS: 8,
-    ROCKET_SIZE: 3,
-    ROCKET_PLANET_ORBIT_RADIUS: 30,
-    FRUSTUM_SIZE: 200,
-    MIN_ZOOM: 0.02,
-    MAX_ZOOM: 5,
+    ROCKET_SIZE: 0.5,
+    ROCKET_PLANET_ORBIT_RADIUS: 16,
+    FRUSTUM_SIZE: 60,
+    MIN_ZOOM: 0.005,
+    MAX_ZOOM: 8,
     STAR_SPREAD: 20000,
+    LANDING_SPEED: 5,    // max relative speed for safe landing
   },
 };
 
