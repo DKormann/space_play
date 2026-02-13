@@ -14,6 +14,64 @@
     }
     canvas { display: block; }
 
+    /* Level picker */
+    #level-picker {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+    #level-picker h1 {
+      color: #ffcc00;
+      font-size: 36px;
+      margin-bottom: 8px;
+      text-shadow: 0 0 20px rgba(255,204,0,0.4);
+    }
+    #level-picker p.subtitle {
+      color: #666;
+      font-size: 14px;
+      margin-bottom: 40px;
+    }
+    .level-cards {
+      display: flex;
+      gap: 24px;
+    }
+    .level-card {
+      width: 220px;
+      padding: 24px;
+      border: 2px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.04);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      text-align: center;
+    }
+    .level-card:hover {
+      border-color: rgba(255,255,255,0.5);
+      background: rgba(255,255,255,0.08);
+    }
+    .level-card h2 {
+      color: #eee;
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
+    .level-card .level-num {
+      color: #ffcc00;
+      font-size: 12px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+    .level-card p {
+      color: #888;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
     /* HUD */
     #hud {
       position: fixed;
@@ -23,6 +81,7 @@
       pointer-events: none;
       z-index: 10;
       text-shadow: 0 0 4px #000;
+      display: none;
     }
     #hud div { margin-bottom: 4px; }
 
@@ -32,7 +91,7 @@
       bottom: 24px;
       left: 50%;
       transform: translateX(-50%);
-      display: flex;
+      display: none;
       gap: 16px;
       z-index: 10;
     }
@@ -68,10 +127,28 @@
       z-index: 10;
       opacity: 0.5;
       text-shadow: 0 0 4px #000;
+      display: none;
     }
   </style>
 </head>
 <body>
+  <div id="level-picker">
+    <h1>Space Player</h1>
+    <p class="subtitle">2D Space Simulator</p>
+    <div class="level-cards">
+      <div class="level-card" data-level="tutorial">
+        <div class="level-num">Level 1</div>
+        <h2>Tutorial</h2>
+        <p>Small system, easy orbits. Learn the controls and orbital mechanics.</p>
+      </div>
+      <div class="level-card" data-level="realistic">
+        <div class="level-num">Level 2</div>
+        <h2>Realistic</h2>
+        <p>Proportional sun &amp; earth with vast distances. Can you orbit Earth?</p>
+      </div>
+    </div>
+  </div>
+
   <div id="hud">
     <div id="hud-speed">Speed: 0</div>
     <div id="hud-pos">Pos: (0, 0)</div>
@@ -93,8 +170,16 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
-    // After Three.js loads as global, dynamically import the ES module game script
-    import('./game.js');
+    document.querySelectorAll('.level-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const levelId = card.dataset.level;
+        document.getElementById('level-picker').style.display = 'none';
+        document.getElementById('hud').style.display = 'block';
+        document.getElementById('instructions').style.display = 'block';
+        document.getElementById('controls').style.display = 'flex';
+        import('./game.js').then(m => m.startGame(levelId));
+      });
+    });
   </script>
 </body>
 </html>

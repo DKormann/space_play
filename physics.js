@@ -2,47 +2,64 @@
 // physics.js - Tweakable physics constants and formulas
 // =============================================================
 
-// --- Gravitational constant ---
-export const G = 500;
+// --- Level presets ---
+export const LEVELS = {
+  tutorial: {
+    name: 'Tutorial',
+    description: 'Small system, easy orbits',
+    G: 500,
+    SUN_MASS: 10000,
+    PLANET_MASS: 10,
+    ROCKET_MASS: 1,
+    PLANET_ORBITAL_RADIUS: 300,
+    ROCKET_THRUST: 50,
+    ROCKET_ROTATION_SPEED: 3,
+    SUN_RADIUS: 30,
+    PLANET_RADIUS: 10,
+    ROCKET_SIZE: 6,
+    ROCKET_PLANET_ORBIT_RADIUS: 40,
+    FRUSTUM_SIZE: 800,
+    MIN_ZOOM: 0.15,
+    MAX_ZOOM: 3,
+    STAR_SPREAD: 4000,
+  },
+  realistic: {
+    name: 'Realistic',
+    description: 'Proportional sun & earth, vast distances',
+    G: 500,
+    SUN_MASS: 100000,
+    PLANET_MASS: 10,
+    ROCKET_MASS: 0.001,
+    PLANET_ORBITAL_RADIUS: 3000,
+    ROCKET_THRUST: 0.15,
+    ROCKET_ROTATION_SPEED: 3,
+    SUN_RADIUS: 100,
+    PLANET_RADIUS: 8,
+    ROCKET_SIZE: 3,
+    ROCKET_PLANET_ORBIT_RADIUS: 30,
+    FRUSTUM_SIZE: 200,
+    MIN_ZOOM: 0.02,
+    MAX_ZOOM: 5,
+    STAR_SPREAD: 20000,
+  },
+};
 
-// --- Masses ---
-// Real ratio Sun:Earth ~ 333000:1, we use ~10000:1 for gameplay
-export const SUN_MASS = 100000;
-export const PLANET_MASS = 10;
-export const ROCKET_MASS = 0.001;
-
-// --- Planet orbit ---
-export const PLANET_ORBITAL_RADIUS = 3000;
-// Correct circular orbital velocity: v = sqrt(G * M_sun / r)
-export const PLANET_INITIAL_VELOCITY = Math.sqrt(G * SUN_MASS / PLANET_ORBITAL_RADIUS);
-
-// --- Rocket ---
-export const ROCKET_THRUST = 0.15;
-export const ROCKET_ROTATION_SPEED = 3;
-
-// --- Visual radii (proportional: Sun ~109x Earth in reality, we use ~12x) ---
-export const SUN_RADIUS = 100;
-export const PLANET_RADIUS = 8;
-export const ROCKET_SIZE = 3;
-
-// --- Collision radii ---
-export const SUN_COLLISION_RADIUS = SUN_RADIUS * 0.9;
-export const PLANET_COLLISION_RADIUS = PLANET_RADIUS * 0.9;
-
-// --- Rocket orbit around planet ---
-// Stable orbit velocity around planet at distance r: v = sqrt(G * PLANET_MASS / r)
-// At r=30 from planet: v = sqrt(500 * 10 / 30) ≈ 12.9
-export const ROCKET_PLANET_ORBIT_RADIUS = 30;
+// Derived values added to each level
+for (const lvl of Object.values(LEVELS)) {
+  lvl.PLANET_INITIAL_VELOCITY = Math.sqrt(lvl.G * lvl.SUN_MASS / lvl.PLANET_ORBITAL_RADIUS);
+  lvl.SUN_COLLISION_RADIUS = lvl.SUN_RADIUS * 0.9;
+  lvl.PLANET_COLLISION_RADIUS = lvl.PLANET_RADIUS * 0.9;
+}
 
 // =============================================================
 // Physics functions
 // =============================================================
 
 /**
- * Calculate gravitational force vector from body A on body B.
- * Returns { fx, fy } - acceleration components acting on body B toward A.
+ * Calculate gravitational acceleration on body B toward body A.
+ * Returns { fx, fy } - acceleration components.
  */
-export function gravitationalForce(ax, ay, massA, bx, by) {
+export function gravitationalForce(G, ax, ay, massA, bx, by) {
   const dx = ax - bx;
   const dy = ay - by;
   const distSq = dx * dx + dy * dy;
@@ -58,8 +75,7 @@ export function gravitationalForce(ax, ay, massA, bx, by) {
 }
 
 /**
- * Euler integration step for a body.
- * Mutates body in-place: { x, y, vx, vy }
+ * Euler integration step. Mutates body in-place: { x, y, vx, vy }
  */
 export function integrate(body, ax, ay, dt) {
   body.vx += ax * dt;
