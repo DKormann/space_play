@@ -124,28 +124,44 @@ export function startGame(levelId) {
   flameMesh.visible = false;
   rocketMesh.add(flameMesh);
 
-  // Red crosshair for player position when zoomed out
-  const crossSize = L.ROCKET_SIZE * 2;
+  // Player indicator when zoomed out: crosshair + facing direction + velocity
+  const crossSize = 1; // unit size, scaled at runtime
   const crossMat = new THREE.LineBasicMaterial({ color: 0xff3333 });
 
+  // Crosshair lines
   const hLine = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-crossSize, 0, 0.5),
-      new THREE.Vector3(crossSize, 0, 0.5),
-    ]),
-    crossMat
+      new THREE.Vector3(-crossSize, 0, 0), new THREE.Vector3(crossSize, 0, 0),
+    ]), crossMat
   );
   const vLine = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, -crossSize, 0.5),
-      new THREE.Vector3(0, crossSize, 0.5),
-    ]),
-    crossMat
+      new THREE.Vector3(0, -crossSize, 0), new THREE.Vector3(0, crossSize, 0),
+    ]), crossMat
   );
-  const crosshair = new THREE.Group();
-  crosshair.add(hLine, vLine);
-  crosshair.visible = false;
-  scene.add(crosshair);
+
+  // Facing direction triangle (points in +Y, rotated at runtime)
+  const dirShape = new THREE.Shape();
+  dirShape.moveTo(0, 2.5);
+  dirShape.lineTo(-0.6, 1.3);
+  dirShape.lineTo(0.6, 1.3);
+  dirShape.closePath();
+  const dirMesh = new THREE.Mesh(
+    new THREE.ShapeGeometry(dirShape),
+    new THREE.MeshBasicMaterial({ color: 0xff3333 })
+  );
+
+  // Velocity line (drawn from origin toward velocity direction, length set at runtime)
+  const velGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0),
+  ]);
+  const velLine = new THREE.Line(velGeo, new THREE.LineBasicMaterial({ color: 0x33ccff }));
+
+  const playerIndicator = new THREE.Group();
+  playerIndicator.add(hLine, vLine, dirMesh, velLine);
+  playerIndicator.visible = false;
+  playerIndicator.position.z = 0.5;
+  scene.add(playerIndicator);
 
   // Rocket state
   const orbitV = Math.sqrt(L.G * L.PLANET_MASS / L.ROCKET_PLANET_ORBIT_RADIUS);
@@ -349,18 +365,31 @@ export function startGame(levelId) {
       }
     }
 
-    // Red crosshair: visible when rocket mesh would be too small to see
-    // (i.e. when viewport covers much more area than rocket neighborhood)
+    // Player indicator: visible when rocket is too small to see
     const effectiveSize = L.FRUSTUM_SIZE / zoom;
     const rocketScreenFraction = L.ROCKET_SIZE / effectiveSize;
     if (rocket.alive && rocketScreenFraction < 0.008) {
-      crosshair.visible = true;
-      crosshair.position.set(rocket.x, rocket.y, 0);
-      // Scale crosshair to stay a constant size on screen
-      const crossScale = effectiveSize * 0.015;
-      crosshair.scale.set(crossScale, crossScale, 1);
+      playerIndicator.visible = true;
+      playerIndicator.position.x = rocket.x;
+      playerIndicator.position.y = rocket.y;
+
+      const s = effectiveSize * 0.015;
+      playerIndicator.scale.set(s, s, 1);
+
+      // Facing direction: rotate the triangle
+      dirMesh.rotation.z = rocket.angle - Math.PI / 2;
+
+      // Velocity line: point in velocity direction, length proportional to speed
+      const speed = Math.sqrt(rocket.vx * rocket.vx + rocket.vy * rocket.vy);
+      const velAngle = Math.atan2(rocket.vy, rocket.vx);
+      velLine.rotation.z = velAngle - Math.PI / 2;
+      // Scale length: map speed to 0-5 units in indicator space
+      const velLen = Math.min(speed / (L.PLANET_INITIAL_VELOCITY * 0.5) * 3, 8);
+      const velPositions = velLine.geometry.attributes.position.array;
+      velPositions[4] = velLen; // endpoint Y
+      velLine.geometry.attributes.position.needsUpdate = true;
     } else {
-      crosshair.visible = false;
+      playerIndicator.visible = false;
     }
 
     // Camera follows rocket
