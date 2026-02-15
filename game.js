@@ -1,7 +1,7 @@
 import {
   LEVELS,
   gravitationalForce, integrate, checkCollision,
-} from './physics.js';
+} from './physics.js?v=2';
 
 // =============================================================
 // Exported entry point - called after level selection
@@ -9,6 +9,7 @@ import {
 
 export function startGame(levelId) {
   const L = LEVELS[levelId];
+  if (!L) throw new Error(`Unknown levelId "${levelId}"`);
 
   const scene = new THREE.Scene();
 
@@ -26,6 +27,37 @@ export function startGame(levelId) {
   document.body.appendChild(renderer.domElement);
 
   let zoom = 1;
+  let logZoom = Math.log(zoom);
+  const clampZoom = () => {
+    const minLog = Math.log(L.MIN_ZOOM);
+    const maxLog = Math.log(L.MAX_ZOOM);
+    logZoom = Math.max(minLog, Math.min(maxLog, logZoom));
+    zoom = Math.exp(logZoom);
+  };
+
+  // Mobile pinch-to-zoom on the canvas (logarithmic scale).
+  const pinch = { active: false, startDist: 0, startLogZoom: 0 };
+  const touchDist = (t0, t1) => Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+  renderer.domElement.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      pinch.active = true;
+      pinch.startDist = touchDist(e.touches[0], e.touches[1]) || 1;
+      pinch.startLogZoom = logZoom;
+      e.preventDefault();
+    }
+  }, { passive: false });
+  renderer.domElement.addEventListener('touchmove', (e) => {
+    if (!pinch.active) return;
+    if (e.touches.length !== 2) return;
+    const dist = touchDist(e.touches[0], e.touches[1]);
+    if (!(dist > 0)) return;
+    // Natural mapping: doubling finger distance doubles zoom (in log space).
+    logZoom = pinch.startLogZoom + Math.log(dist / pinch.startDist);
+    clampZoom();
+    e.preventDefault();
+  }, { passive: false });
+  renderer.domElement.addEventListener('touchend', () => { pinch.active = false; }, { passive: true });
+  renderer.domElement.addEventListener('touchcancel', () => { pinch.active = false; }, { passive: true });
 
   // =========================================================
   // Starfield
@@ -61,37 +93,77 @@ export function startGame(levelId) {
   scene.add(glowMesh);
 
   // =========================================================
-  // Planet orbit line
+  // Planet(s)
   // =========================================================
 
-  const orbitPoints = [];
-  for (let i = 0; i <= 256; i++) {
-    const a = (i / 256) * Math.PI * 2;
-    orbitPoints.push(new THREE.Vector3(
-      Math.cos(a) * L.PLANET_ORBITAL_RADIUS,
-      Math.sin(a) * L.PLANET_ORBITAL_RADIUS,
-      -0.5
-    ));
+  function createWorldLabel(color, text) {
+    const el = document.createElement('div');
+    el.style.cssText = `
+      position:fixed; pointer-events:none; z-index:11;
+      display:none;
+      font-family:'Courier New',monospace; font-size:12px;
+      color:${color}; text-shadow:0 0 4px #000;
+      transform:translate(-50%,-50%);
+      white-space:nowrap;
+    `;
+    el.textContent = text;
+    document.body.appendChild(el);
+    return el;
   }
-  scene.add(new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(orbitPoints),
-    new THREE.LineBasicMaterial({ color: 0x334455, transparent: true, opacity: 0.4 })
-  ));
 
-  // =========================================================
-  // Planet
-  // =========================================================
+  function makeOrbitLine(radius) {
+    const pts = [];
+    for (let i = 0; i <= 256; i++) {
+      const a = (i / 256) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, -0.5));
+    }
+    return new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: 0x334455, transparent: true, opacity: 0.35 })
+    );
+  }
 
-  const planetMesh = new THREE.Mesh(
-    new THREE.CircleGeometry(L.PLANET_RADIUS, 32),
-    new THREE.MeshBasicMaterial({ color: 0x44aacc })
-  );
-  scene.add(planetMesh);
+  // Defensive: allow older single-planet levels (or stale cached modules) that
+  // don't have L.PLANETS yet.
+  const planetSpecs = Array.isArray(L.PLANETS) ? L.PLANETS : [{
+    name: 'Earth',
+    color: 0x44aacc,
+    mass: L.PLANET_MASS ?? 10,
+    radius: L.PLANET_RADIUS ?? 10,
+    orbitalRadius: L.PLANET_ORBITAL_RADIUS ?? 300,
+    initialVelocity: L.PLANET_INITIAL_VELOCITY,
+    collisionRadius: L.PLANET_COLLISION_RADIUS,
+  }];
 
-  const planet = {
-    x: L.PLANET_ORBITAL_RADIUS, y: 0,
-    vx: 0, vy: L.PLANET_INITIAL_VELOCITY,
-  };
+  const planets = planetSpecs.map((p, idx) => {
+    scene.add(makeOrbitLine(p.orbitalRadius));
+    const mesh = new THREE.Mesh(
+      new THREE.CircleGeometry(p.radius, 32),
+      new THREE.MeshBasicMaterial({ color: p.color })
+    );
+    scene.add(mesh);
+    const labelEl = createWorldLabel(
+      '#' + ((p.color ?? 0xffffff) >>> 0).toString(16).padStart(6, '0'),
+      p.name ?? `Planet ${idx + 1}`
+    );
+    // Start on +X axis, counterclockwise orbit.
+    const state = {
+      idx,
+      name: p.name,
+      color: p.color,
+      mass: p.mass,
+      radius: p.radius,
+      collisionRadius: p.collisionRadius ?? p.radius,
+      x: p.orbitalRadius,
+      y: 0,
+      vx: 0,
+      vy: p.initialVelocity ?? Math.sqrt(L.G * L.SUN_MASS / p.orbitalRadius),
+      mesh,
+      labelEl,
+    };
+    return state;
+  });
+  const homePlanet = planets[0];
 
   // =========================================================
   // Rocket
@@ -164,17 +236,18 @@ export function startGame(levelId) {
   scene.add(playerIndicator);
 
   // Rocket state
-  const orbitV = Math.sqrt(L.G * L.PLANET_MASS / L.ROCKET_PLANET_ORBIT_RADIUS);
+  const orbitV = Math.sqrt(L.G * homePlanet.mass / L.ROCKET_PLANET_ORBIT_RADIUS);
   const rocket = {
-    x: planet.x + L.ROCKET_PLANET_ORBIT_RADIUS,
-    y: planet.y,
-    vx: planet.vx,
-    vy: planet.vy + orbitV,
+    x: homePlanet.x + L.ROCKET_PLANET_ORBIT_RADIUS,
+    y: homePlanet.y,
+    vx: homePlanet.vx,
+    vy: homePlanet.vy + orbitV,
     angle: Math.PI / 2,
     thrusting: false,
     alive: true,
     landed: false,
     landedAngle: 0, // angle on planet surface where landed
+    landedPlanetIdx: 0,
   };
 
   // =========================================================
@@ -206,7 +279,10 @@ export function startGame(levelId) {
   }
 
   const sunIndicator = createIndicator('#ffcc00', 'Sun');
-  const planetIndicator = createIndicator('#44aacc', 'Earth');
+  const planetIndicators = planets.map((p) => createIndicator(
+    '#' + (p.color >>> 0).toString(16).padStart(6, '0'),
+    p.name
+  ));
 
   function updateIndicator(indicator, worldX, worldY) {
     const effectiveSize = L.FRUSTUM_SIZE / zoom;
@@ -263,8 +339,11 @@ export function startGame(levelId) {
   });
 
   window.addEventListener('wheel', (e) => {
-    zoom *= e.deltaY > 0 ? 0.9 : 1.1;
-    zoom = Math.max(L.MIN_ZOOM, Math.min(L.MAX_ZOOM, zoom));
+    // Logarithmic scaling: wheel deltas apply in log space, then exponentiate.
+    // This makes zoom feel consistent over huge ranges.
+    const ZOOM_SENS = 0.0015;
+    logZoom += -e.deltaY * ZOOM_SENS;
+    clampZoom();
   });
 
   function setupTouchButton(id, key) {
@@ -295,11 +374,11 @@ export function startGame(levelId) {
   // =========================================================
 
   function respawnRocket() {
-    const v = Math.sqrt(L.G * L.PLANET_MASS / L.ROCKET_PLANET_ORBIT_RADIUS);
-    rocket.x = planet.x + L.ROCKET_PLANET_ORBIT_RADIUS;
-    rocket.y = planet.y;
-    rocket.vx = planet.vx;
-    rocket.vy = planet.vy + v;
+    const v = Math.sqrt(L.G * homePlanet.mass / L.ROCKET_PLANET_ORBIT_RADIUS);
+    rocket.x = homePlanet.x + L.ROCKET_PLANET_ORBIT_RADIUS;
+    rocket.y = homePlanet.y;
+    rocket.vx = homePlanet.vx;
+    rocket.vy = homePlanet.vy + v;
     rocket.angle = Math.PI / 2;
     rocket.thrusting = false;
     rocket.alive = true;
@@ -315,7 +394,7 @@ export function startGame(levelId) {
   // Time scale
   // =========================================================
 
-  const timeScales = [0, 0.25, 0.5, 1, 2, 4, 8, 16];
+  const timeScales = [0,0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16];
   let timeScaleIndex = 3; // starts at 1x
   let timeScale = 1;
   const hudTime = document.getElementById('hud-time');
@@ -326,20 +405,76 @@ export function startGame(levelId) {
     if (hudTime) hudTime.textContent = timeScale === 0 ? 'Time: PAUSED' : `Time: ${timeScale}x`;
   }
 
-  document.getElementById('ts-slower')?.addEventListener('click', () => setTimeScale(timeScaleIndex - 1));
-  document.getElementById('ts-faster')?.addEventListener('click', () => setTimeScale(timeScaleIndex + 1));
+  const stepSlower = () => setTimeScale(timeScaleIndex - 1);
+  const stepFaster = () => setTimeScale(timeScaleIndex + 1);
+
+  // Press-and-hold stepping for mouse + touch.
+  function bindRepeat(el, stepFn) {
+    if (!el) return;
+    let timer = null;
+    let interval = null;
+    const stop = () => {
+      if (timer) clearTimeout(timer);
+      if (interval) clearInterval(interval);
+      timer = null;
+      interval = null;
+    };
+    const start = (e) => {
+      e?.preventDefault?.();
+      stepFn(); // immediate
+      stop();
+      const firstDelayMs = 250;
+      const repeatMs = 120;
+      timer = setTimeout(() => {
+        interval = setInterval(stepFn, repeatMs);
+      }, firstDelayMs);
+    };
+    el.addEventListener('mousedown', start);
+    el.addEventListener('touchstart', start, { passive: false });
+    window.addEventListener('mouseup', stop);
+    window.addEventListener('mouseleave', stop);
+    el.addEventListener('touchend', stop);
+    el.addEventListener('touchcancel', stop);
+  }
+
+  bindRepeat(document.getElementById('ts-slower'), stepSlower);
+  bindRepeat(document.getElementById('ts-faster'), stepFaster);
+
   document.getElementById('ts-pause')?.addEventListener('click', () => {
     if (timeScale === 0) setTimeScale(3); // unpause to 1x
     else setTimeScale(0);
   });
 
+  // Keyboard: allow single-step and hold-to-repeat stepping.
+  const tsHold = { slower: false, faster: false };
+  let tsHoldTime = 0;
+  let tsRepeatAccum = 0;
+  const TS_FIRST_DELAY = 0.25; // seconds
+  const TS_REPEAT_INTERVAL = 0.12; // seconds per step after delay
+
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Comma' || e.code === 'BracketLeft') setTimeScale(timeScaleIndex - 1);
-    if (e.code === 'Period' || e.code === 'BracketRight') setTimeScale(timeScaleIndex + 1);
+    if (e.code === 'Comma' || e.code === 'BracketLeft') {
+      tsHold.slower = true;
+      if (!e.repeat) stepSlower();
+      e.preventDefault();
+    }
+    if (e.code === 'Period' || e.code === 'BracketRight' ) {
+      tsHold.faster = true;
+      if (!e.repeat) stepFaster();
+      e.preventDefault();
+    }
     if (e.code === 'Space') {
       e.preventDefault();
       if (timeScale === 0) setTimeScale(3);
       else setTimeScale(0);
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Comma' || e.code === 'BracketLeft') tsHold.slower = false;
+    if (e.code === 'Period' || e.code === 'BracketRight') tsHold.faster = false;
+    if (!tsHold.slower && !tsHold.faster) {
+      tsHoldTime = 0;
+      tsRepeatAccum = 0;
     }
   });
 
@@ -348,87 +483,158 @@ export function startGame(levelId) {
   // =========================================================
 
   const clock = new THREE.Clock();
+  // Fixed-step simulation reduces visible jitter at high zoom by avoiding
+  // variable-sized Euler steps when frame time fluctuates.
+  const FIXED_DT = 1 / 120;
+  const MAX_STEPS_PER_FRAME = 10;
+  let simAccum = 0;
+  // Previous-step state for render interpolation.
+  let planetPrevX = homePlanet.x, planetPrevY = homePlanet.y;
+  let rocketPrevX = rocket.x, rocketPrevY = rocket.y, rocketPrevAngle = rocket.angle;
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function lerpAngle(a, b, t) {
+    // Shortest-path interpolation for angles (avoids wrap-around jumps).
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return a + d * t;
+  }
 
   function animate() {
     requestAnimationFrame(animate);
 
-    let dt = clock.getDelta();
-    if (dt > 0.05) dt = 0.05;
-    dt *= timeScale;
+    // Real frame delta (unscaled) for rendering/camera.
+    let frameDt = clock.getDelta();
+    if (frameDt > 0.05) frameDt = 0.05;
 
-    // Planet physics
-    const pg = gravitationalForce(L.G, 0, 0, L.SUN_MASS, planet.x, planet.y);
-    integrate(planet, pg.fx, pg.fy, dt);
+    // Rotation steering is in real-time, not simulation-time (not affected by timeScale).
+    if (rocket.alive) {
+      if (keys.left) rocket.angle += L.ROCKET_ROTATION_SPEED * frameDt;
+      if (keys.right) rocket.angle -= L.ROCKET_ROTATION_SPEED * frameDt;
+    }
 
-    // Rocket physics
-    if (rocket.alive && rocket.landed) {
-      // Stick to planet surface
-      rocket.x = planet.x + Math.cos(rocket.landedAngle) * (L.PLANET_RADIUS + L.ROCKET_SIZE * 0.5);
-      rocket.y = planet.y + Math.sin(rocket.landedAngle) * (L.PLANET_RADIUS + L.ROCKET_SIZE * 0.5);
-      rocket.vx = planet.vx;
-      rocket.vy = planet.vy;
-
-      // Allow rotation while landed
-      if (keys.left) rocket.angle += L.ROCKET_ROTATION_SPEED * dt;
-      if (keys.right) rocket.angle -= L.ROCKET_ROTATION_SPEED * dt;
-
-      // Thrust to take off
-      rocket.thrusting = keys.forward;
-      if (rocket.thrusting) {
-        rocket.landed = false;
-        rocket.vx += Math.cos(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS * dt * 5;
-        rocket.vy += Math.sin(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS * dt * 5;
+    // Time-scale stepping while keys are held.
+    if (tsHold.slower || tsHold.faster) {
+      tsHoldTime += frameDt;
+      if (tsHoldTime >= TS_FIRST_DELAY) {
+        tsRepeatAccum += frameDt;
+        while (tsRepeatAccum >= TS_REPEAT_INTERVAL) {
+          tsRepeatAccum -= TS_REPEAT_INTERVAL;
+          if (tsHold.slower) stepSlower();
+          if (tsHold.faster) stepFaster();
+        }
       }
-    } else if (rocket.alive) {
-      if (keys.left) rocket.angle += L.ROCKET_ROTATION_SPEED * dt;
-      if (keys.right) rocket.angle -= L.ROCKET_ROTATION_SPEED * dt;
+    } else {
+      tsHoldTime = 0;
+      tsRepeatAccum = 0;
+    }
 
-      const sg = gravitationalForce(L.G, 0, 0, L.SUN_MASS, rocket.x, rocket.y);
-      const eg = gravitationalForce(L.G, planet.x, planet.y, L.PLANET_MASS, rocket.x, rocket.y);
+    // Simulation delta respects timeScale and runs in fixed increments.
+    const simDt = frameDt * timeScale;
+    simAccum += simDt;
 
-      let ax = sg.fx + eg.fx;
-      let ay = sg.fy + eg.fy;
+    // Physics step(s)
+    let steps = 0;
+    while (simAccum >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
+      steps++;
+      simAccum -= FIXED_DT;
 
-      rocket.thrusting = keys.forward;
-      if (rocket.thrusting) {
-        ax += Math.cos(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS;
-        ay += Math.sin(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS;
-      }
+      // Capture previous state for interpolation (before mutating this step).
+      planetPrevX = homePlanet.x; planetPrevY = homePlanet.y;
+      rocketPrevX = rocket.x; rocketPrevY = rocket.y; rocketPrevAngle = rocket.angle;
 
-      integrate(rocket, ax, ay, dt);
-
-      // Sun collision: always fatal
-      if (checkCollision(rocket.x, rocket.y, L.ROCKET_SIZE * 0.5, 0, 0, L.SUN_COLLISION_RADIUS)) {
-        rocket.alive = false;
-        rocketMesh.visible = false;
+      // Planet physics (each planet orbits sun; no planet-planet gravity for simplicity)
+      for (const pl of planets) {
+        const pg = gravitationalForce(L.G, 0, 0, L.SUN_MASS, pl.x, pl.y);
+        integrate(pl, pg.fx, pg.fy, FIXED_DT);
       }
 
-      // Planet collision: land or crash depending on relative speed
-      if (checkCollision(rocket.x, rocket.y, L.ROCKET_SIZE * 0.5, planet.x, planet.y, L.PLANET_COLLISION_RADIUS)) {
-        const relVx = rocket.vx - planet.vx;
-        const relVy = rocket.vy - planet.vy;
-        const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
+      // Rocket physics
+      if (rocket.alive && rocket.landed) {
+        const landedOn = planets[rocket.landedPlanetIdx] ?? homePlanet;
+        // Stick to planet surface
+        rocket.x = landedOn.x + Math.cos(rocket.landedAngle) * (landedOn.radius + L.ROCKET_SIZE * 0.5);
+        rocket.y = landedOn.y + Math.sin(rocket.landedAngle) * (landedOn.radius + L.ROCKET_SIZE * 0.5);
+        rocket.vx = landedOn.vx;
+        rocket.vy = landedOn.vy;
 
-        if (relSpeed < L.LANDING_SPEED) {
-          // Safe landing
-          rocket.landed = true;
-          rocket.landedAngle = Math.atan2(rocket.y - planet.y, rocket.x - planet.x);
-          rocket.vx = planet.vx;
-          rocket.vy = planet.vy;
-        } else {
-          // Crash
+        // Thrust to take off
+        rocket.thrusting = keys.forward;
+        if (rocket.thrusting) {
+          rocket.landed = false;
+          rocket.vx += Math.cos(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS * FIXED_DT;
+          rocket.vy += Math.sin(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS * FIXED_DT;
+        }
+      } else if (rocket.alive) {
+        const sg = gravitationalForce(L.G, 0, 0, L.SUN_MASS, rocket.x, rocket.y);
+        let ax = sg.fx;
+        let ay = sg.fy;
+        for (const pl of planets) {
+          const pg = gravitationalForce(L.G, pl.x, pl.y, pl.mass, rocket.x, rocket.y);
+          ax += pg.fx;
+          ay += pg.fy;
+        }
+
+        rocket.thrusting = keys.forward;
+        if (rocket.thrusting) {
+          ax += Math.cos(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS;
+          ay += Math.sin(rocket.angle) * L.ROCKET_THRUST / L.ROCKET_MASS;
+        }
+
+        integrate(rocket, ax, ay, FIXED_DT);
+
+        // Sun collision: always fatal
+        if (checkCollision(rocket.x, rocket.y, L.ROCKET_SIZE * 0.5, 0, 0, L.SUN_COLLISION_RADIUS)) {
           rocket.alive = false;
           rocketMesh.visible = false;
         }
+
+        // Planet collision: land or crash depending on relative speed
+        for (const pl of planets) {
+          if (!rocket.alive) break;
+          if (!checkCollision(rocket.x, rocket.y, L.ROCKET_SIZE * 0.5, pl.x, pl.y, pl.collisionRadius)) continue;
+
+          const relVx = rocket.vx - pl.vx;
+          const relVy = rocket.vy - pl.vy;
+          const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
+
+          if (relSpeed < L.LANDING_SPEED) {
+            // Safe landing
+            rocket.landed = true;
+            rocket.landedPlanetIdx = pl.idx;
+            rocket.landedAngle = Math.atan2(rocket.y - pl.y, rocket.x - pl.x);
+            rocket.vx = pl.vx;
+            rocket.vy = pl.vy;
+          } else {
+            // Crash
+            rocket.alive = false;
+            rocketMesh.visible = false;
+          }
+        }
       }
     }
+    // Prevent unbounded catch-up (e.g., after tab was hidden); drop backlog.
+    if (steps === MAX_STEPS_PER_FRAME) simAccum = 0;
+
+    // Render interpolation factor between previous and current step.
+    const alpha = FIXED_DT > 0 ? (simAccum / FIXED_DT) : 0;
+    const planetRX = lerp(planetPrevX, homePlanet.x, alpha);
+    const planetRY = lerp(planetPrevY, homePlanet.y, alpha);
+    const rocketRX = lerp(rocketPrevX, rocket.x, alpha);
+    const rocketRY = lerp(rocketPrevY, rocket.y, alpha);
+    const rocketRAngle = lerpAngle(rocketPrevAngle, rocket.angle, alpha);
 
     // Update meshes
-    planetMesh.position.set(planet.x, planet.y, 0);
+    // Home planet render position uses interpolation; other planets render at latest sim state.
+    for (const pl of planets) {
+      if (pl === homePlanet) pl.mesh.position.set(planetRX, planetRY, 0);
+      else pl.mesh.position.set(pl.x, pl.y, 0);
+    }
 
     if (rocket.alive) {
-      rocketMesh.position.set(rocket.x, rocket.y, 0);
-      rocketMesh.rotation.z = rocket.angle - Math.PI / 2;
+      rocketMesh.position.set(rocketRX, rocketRY, 0);
+      rocketMesh.rotation.z = rocketRAngle - Math.PI / 2;
       flameMesh.visible = rocket.thrusting;
       if (rocket.thrusting) {
         flameMesh.scale.y = 0.8 + Math.random() * 0.5;
@@ -440,14 +646,14 @@ export function startGame(levelId) {
     const rocketScreenFraction = L.ROCKET_SIZE / effectiveSize;
     if (rocket.alive && rocketScreenFraction < 0.008) {
       playerIndicator.visible = true;
-      playerIndicator.position.x = rocket.x;
-      playerIndicator.position.y = rocket.y;
+      playerIndicator.position.x = rocketRX;
+      playerIndicator.position.y = rocketRY;
 
       const s = effectiveSize * 0.015;
       playerIndicator.scale.set(s, s, 1);
 
       // Facing direction: rotate the triangle
-      dirMesh.rotation.z = rocket.angle - Math.PI / 2;
+      dirMesh.rotation.z = rocketRAngle - Math.PI / 2;
 
       // Velocity line: point in velocity direction, length proportional to speed
       const speed = Math.sqrt(rocket.vx * rocket.vx + rocket.vy * rocket.vy);
@@ -463,9 +669,13 @@ export function startGame(levelId) {
     }
 
     // Camera follows rocket
-    const camTarget = rocket.alive ? rocket : planet;
-    camera.position.x += (camTarget.x - camera.position.x) * 0.05;
-    camera.position.y += (camTarget.y - camera.position.y) * 0.05;
+    const camTarget = rocket.alive
+      ? { x: rocketRX, y: rocketRY }
+      : { x: planetRX, y: planetRY };
+    // Frame-rate independent smoothing: time constant in seconds.
+    const follow = 1 - Math.exp(-12 * frameDt);
+    camera.position.x += (camTarget.x - camera.position.x) * follow;
+    camera.position.y += (camTarget.y - camera.position.y) * follow;
 
     camera.left = -effectiveSize * aspect / 2;
     camera.right = effectiveSize * aspect / 2;
@@ -479,7 +689,29 @@ export function startGame(levelId) {
 
     // Off-screen indicators
     updateIndicator(sunIndicator, 0, 0);
-    updateIndicator(planetIndicator, planet.x, planet.y);
+    for (let i = 0; i < planets.length; i++) {
+      const pl = planets[i];
+      const ind = planetIndicators[i];
+      if (!ind) continue;
+      const wx = pl === homePlanet ? planetRX : pl.x;
+      const wy = pl === homePlanet ? planetRY : pl.y;
+      updateIndicator(ind, wx, wy);
+    }
+
+    // In-world labels (so you can actually tell there are multiple planets).
+    for (const pl of planets) {
+      const wx = pl === homePlanet ? planetRX : pl.x;
+      const wy = pl === homePlanet ? planetRY : pl.y;
+      const v = new THREE.Vector3(wx, wy, 0).project(camera);
+      const sx = (v.x * 0.5 + 0.5) * window.innerWidth;
+      const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
+      const onScreen = (sx >= 0 && sx <= window.innerWidth && sy >= 0 && sy <= window.innerHeight && v.z < 1);
+      pl.labelEl.style.display = onScreen ? 'block' : 'none';
+      if (onScreen) {
+        pl.labelEl.style.left = sx + 'px';
+        pl.labelEl.style.top = (sy - 18) + 'px';
+      }
+    }
 
     // HUD
     if (hudSpeed) {
@@ -490,7 +722,8 @@ export function startGame(levelId) {
       if (!rocket.alive) {
         hudPos.textContent = 'DESTROYED - Press R to respawn';
       } else if (rocket.landed) {
-        hudPos.textContent = 'LANDED - Thrust to take off';
+        const landedOn = planets[rocket.landedPlanetIdx] ?? homePlanet;
+        hudPos.textContent = `LANDED on ${landedOn.name} - Thrust to take off`;
       } else {
         hudPos.textContent = `Pos: (${rocket.x.toFixed(0)}, ${rocket.y.toFixed(0)})`;
       }
