@@ -488,8 +488,9 @@ export function startGame(levelId) {
   const FIXED_DT = 1 / 120;
   const MAX_STEPS_PER_FRAME = 10;
   let simAccum = 0;
-  // Previous-step state for render interpolation.
-  let planetPrevX = homePlanet.x, planetPrevY = homePlanet.y;
+  // Previous-step state for render interpolation (all planets + rocket).
+  const planetPrevX = planets.map(p => p.x);
+  const planetPrevY = planets.map(p => p.y);
   let rocketPrevX = rocket.x, rocketPrevY = rocket.y, rocketPrevAngle = rocket.angle;
 
   function lerp(a, b, t) { return a + (b - a) * t; }
@@ -541,7 +542,10 @@ export function startGame(levelId) {
       simAccum -= FIXED_DT;
 
       // Capture previous state for interpolation (before mutating this step).
-      planetPrevX = homePlanet.x; planetPrevY = homePlanet.y;
+      for (let i = 0; i < planets.length; i++) {
+        planetPrevX[i] = planets[i].x;
+        planetPrevY[i] = planets[i].y;
+      }
       rocketPrevX = rocket.x; rocketPrevY = rocket.y; rocketPrevAngle = rocket.angle;
 
       // Planet physics (each planet orbits sun; no planet-planet gravity for simplicity)
@@ -619,17 +623,16 @@ export function startGame(levelId) {
 
     // Render interpolation factor between previous and current step.
     const alpha = FIXED_DT > 0 ? (simAccum / FIXED_DT) : 0;
-    const planetRX = lerp(planetPrevX, homePlanet.x, alpha);
-    const planetRY = lerp(planetPrevY, homePlanet.y, alpha);
+    // Interpolate all planet positions to eliminate jitter.
+    const planetRXs = planets.map((p, i) => lerp(planetPrevX[i], p.x, alpha));
+    const planetRYs = planets.map((p, i) => lerp(planetPrevY[i], p.y, alpha));
     const rocketRX = lerp(rocketPrevX, rocket.x, alpha);
     const rocketRY = lerp(rocketPrevY, rocket.y, alpha);
     const rocketRAngle = lerpAngle(rocketPrevAngle, rocket.angle, alpha);
 
-    // Update meshes
-    // Home planet render position uses interpolation; other planets render at latest sim state.
-    for (const pl of planets) {
-      if (pl === homePlanet) pl.mesh.position.set(planetRX, planetRY, 0);
-      else pl.mesh.position.set(pl.x, pl.y, 0);
+    // Update meshes with interpolated positions for all planets.
+    for (let i = 0; i < planets.length; i++) {
+      planets[i].mesh.position.set(planetRXs[i], planetRYs[i], 0);
     }
 
     if (rocket.alive) {
@@ -671,7 +674,7 @@ export function startGame(levelId) {
     // Camera follows rocket
     const camTarget = rocket.alive
       ? { x: rocketRX, y: rocketRY }
-      : { x: planetRX, y: planetRY };
+      : { x: planetRXs[0], y: planetRYs[0] };
     // Frame-rate independent smoothing: time constant in seconds.
     const follow = 1 - Math.exp(-12 * frameDt);
     camera.position.x += (camTarget.x - camera.position.x) * follow;
@@ -690,19 +693,15 @@ export function startGame(levelId) {
     // Off-screen indicators
     updateIndicator(sunIndicator, 0, 0);
     for (let i = 0; i < planets.length; i++) {
-      const pl = planets[i];
       const ind = planetIndicators[i];
       if (!ind) continue;
-      const wx = pl === homePlanet ? planetRX : pl.x;
-      const wy = pl === homePlanet ? planetRY : pl.y;
-      updateIndicator(ind, wx, wy);
+      updateIndicator(ind, planetRXs[i], planetRYs[i]);
     }
 
     // In-world labels (so you can actually tell there are multiple planets).
-    for (const pl of planets) {
-      const wx = pl === homePlanet ? planetRX : pl.x;
-      const wy = pl === homePlanet ? planetRY : pl.y;
-      const v = new THREE.Vector3(wx, wy, 0).project(camera);
+    for (let i = 0; i < planets.length; i++) {
+      const pl = planets[i];
+      const v = new THREE.Vector3(planetRXs[i], planetRYs[i], 0).project(camera);
       const sx = (v.x * 0.5 + 0.5) * window.innerWidth;
       const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
       const onScreen = (sx >= 0 && sx <= window.innerWidth && sy >= 0 && sy <= window.innerHeight && v.z < 1);
